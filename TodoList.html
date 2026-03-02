@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProductiveFlow - Ultimate</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Framer Motion -->
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        },
+                        dark: {
+                            bg: '#0f172a',
+                            surface: '#1e293b',
+                            border: '#334155'
+                        },
+                        stock: {
+                            up: '#10b981',
+                            down: '#ef4444',
+                            neutral: '#64748b'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(8px);
+        }
+        .dark .glass-panel {
+            background: rgba(30, 41, 59, 0.9);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-slate-900 dark:bg-dark-bg dark:text-slate-100 transition-colors duration-300">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
+        const { motion, AnimatePresence, Reorder } = window.Motion;
+
+        // --- Shared Logic & Constants ---
+        
+        const generateId = () => Math.random().toString(36).substr(2, 9);
+        
+        const DEFAULT_TAGS = [
+            { id: 't1', name: 'work', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
+            { id: 't2', name: 'personal', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' },
+            { id: 't3', name: 'finance', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
+            { id: 't4', name: 'health', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' },
+            { id: 't5', name: 'books', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
+            { id: 't6', name: 'movies', color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300' },
+            { id: 't7', name: 'ideas', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
+            { id: 'tstock', name: 'stock', color: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+        ];
+
+        const PROFILES = {
+            general: { id: 'general', label: 'Productivity Czar', icon: 'Zap', filters: [] },
+            market: { id: 'market', label: 'Market Pro', icon: 'TrendingUp', filters: ['stock', 'finance', 'crypto'] },
+            work: { id: 'work', label: 'Work Mode', icon: 'Briefcase', filters: ['work', 'career', 'project'] }
+        };
+
+        const DATE_PRESETS = [
+            { id: 'd1', label: 'today', value: 'today', icon: 'Sun' },
+            { id: 'd2', label: 'tomorrow', value: 'tomorrow', icon: 'Sunrise' },
+            { id: 'd3', label: 'next...', value: 'next ', icon: 'ArrowRight', isTrigger: true },
+        ];
+        
+        const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            .map(d => ({ id: d, label: d, value: `next ${d}`, icon: 'Calendar' }));
+
+        const PLACEHOLDERS = [
+            'Try: "Finish report #work !!! @tomorrow"',
+            'Try: "Buy $AAPL @ 150 TP:160 #stock"',
+            'Try: "Read The Great Gatsby #books"',
+            'Try: "Gym session #health @6pm"',
+            'Try: "Review portfolio #finance"'
+        ];
+
+        // --- Parsing Engine ---
+        const parseTaskInput = (text, existingTags = []) => {
+            const result = {
+                originalText: text,
+                cleanText: text,
+                tags: [...existingTags], // Start with existing tags to preserve them if not explicitly removed
+                priority: 'low',
+                dueDate: null,
+                stockMetadata: null
+            };
+
+            // 1. Extract Tags (merge with existing unique)
+            const tagMatches = text.match(/#\w+/g);
+            if (tagMatches) {
+                const newTags = tagMatches.map(t => t.slice(1));
+                result.tags = [...new Set([...result.tags, ...newTags])];
+                result.cleanText = result.cleanText.replace(/#\w+/g, '');
+            }
+
+            // 2. Extract Priority
+            if (text.includes('!!!')) { result.priority = 'high'; result.cleanText = result.cleanText.replace('!!!', ''); }
+            else if (text.includes('!!')) { result.priority = 'medium'; result.cleanText = result.cleanText.replace('!!', ''); }
+            
+            // 3. Extract Date
+            const now = new Date();
+            if (text.match(/@tomorrow/i)) {
+                const d = new Date(); d.setDate(d.getDate() + 1);
+                result.dueDate = d.toISOString();
+                result.cleanText = result.cleanText.replace(/@tomorrow/i, '');
+            } else if (text.match(/@today/i)) {
+                result.dueDate = new Date().toISOString();
+                result.cleanText = result.cleanText.replace(/@today/i, '');
+            } else {
+                const nextMatch = text.match(/@next\s+(\w+)/i);
+                if (nextMatch) {
+                    const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+                    const targetIdx = days.indexOf(nextMatch[1].toLowerCase());
+                    if (targetIdx !== -1) {
+                        const currentDay = now.getDay();
+                        let diff = (targetIdx + 7 - currentDay) % 7;
+                        if (diff === 0) diff = 7;
+                        now.setDate(now.getDate() + diff);
+                        result.dueDate = now.toISOString();
+                        result.cleanText = result.cleanText.replace(nextMatch[0], '');
+                    }
+                }
+            }
+
+            // 4. Stock Parsing ($ symbol trigger)
+            if (text.includes('$')) {
+                const metadata = { entryTime: new Date().toISOString() };
+                const tickerMatch = text.match(/\$([A-Z]+)/i);
+                
+                if (tickerMatch) {
+                    metadata.ticker = tickerMatch[1].toUpperCase();
+                    if (!result.tags.includes('stock')) result.tags.push('stock');
+                    
+                    if (text.match(/\bBuy\b/i)) metadata.side = 'buy';
+                    else if (text.match(/\bSell\b/i)) metadata.side = 'sell';
+
+                    const entryMatch = text.match(/@\s*(\d+(?:\.\d+)?)/);
+                    if (entryMatch) metadata.entryPrice = parseFloat(entryMatch[1]);
+
+                    const tpMatch = text.match(/(?:TP|Target):\s*(\d+(?:\.\d+)?)/i);
+                    if (tpMatch) metadata.tp = parseFloat(tpMatch[1]);
+
+                    const slMatch = text.match(/(?:SL|Stop):\s*(\d+(?:\.\d+)?)/i);
+                    if (slMatch) metadata.sl = parseFloat(slMatch[1]);
+
+                    const reasonMatch = text.match(/Why:\s*(.*)/i);
+                    if (reasonMatch) metadata.reason = reasonMatch[1].trim();
+
+                    result.stockMetadata = metadata;
+                    
+                    // Cleanup user text if it's purely a data entry command
+                    if (result.cleanText.replace(/\$([A-Z]+)/i, '').trim().length < 5) {
+                        result.cleanText = `${metadata.side?.toUpperCase() || 'Trade'} ${metadata.ticker}`;
+                    }
+                }
+            }
+
+            result.cleanText = result.cleanText.replace(/\s+/g, ' ').trim();
+            if (!result.cleanText) result.cleanText = "Untitled Task";
+            
+            return result;
+        };
+
+        // --- Icons Wrapper ---
+        const Icon = ({ name, size = 18, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons({
+                        icons: { [name]: window.lucide.icons[name] },
+                        nameAttr: 'data-lucide',
+                        attrs: {
+                            class: `lucide lucide-${name} ${className}`,
+                            width: size,
+                            height: size,
+                        }
+                    });
+                    const iconNode = window.lucide.icons[name];
+                    if (iconNode && iconRef.current) {
+                        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                        svg.setAttribute("width", size);
+                        svg.setAttribute("height", size);
+                        svg.setAttribute("viewBox", "0 0 24 24");
+                        svg.setAttribute("fill", "none");
+                        svg.setAttribute("stroke", "currentColor");
+                        svg.setAttribute("stroke-width", "2");
+                        svg.setAttribute("stroke-linecap", "round");
+                        svg.setAttribute("stroke-linejoin", "round");
+                        svg.setAttribute("class", className);
+                        iconNode.forEach(([tag, attrs]) => {
+                            const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+                            Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+                            svg.appendChild(el);
+                        });
+                        iconRef.current.innerHTML = '';
+                        iconRef.current.appendChild(svg);
+                    }
+                }
+            }, [name, size, className]);
+            return <span ref={iconRef} className="inline-flex items-center justify-center align-middle" />;
+        };
+
+        // --- UI Components ---
+        
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="bg-white dark:bg-dark-surface rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-gray-100 dark:border-gray-700 flex flex-col max-h-[90vh]"
+                    >
+                        <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-700">
+                            <h3 className="font-semibold text-lg">{title}</h3>
+                            <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full"><Icon name="X" size={20} /></button>
+                        </div>
+                        <div className="p-6 overflow-y-auto">
+                            {children}
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        const SettingsModal = ({ isOpen, onClose, todos, setTodos, tags, setTags }) => {
+            const [jsonInput, setJsonInput] = useState("");
+
+            const handleImport = () => {
+                try {
+                    const data = JSON.parse(jsonInput);
+                    if (Array.isArray(data)) {
+                        setTodos(data);
+                        alert("Data imported successfully!");
+                        onClose();
+                    } else {
+                        alert("Invalid JSON: Expected an array.");
+                    }
+                } catch (e) {
+                    alert("Invalid JSON format.");
+                }
+            };
+
+            const handleExport = () => {
+                setJsonInput(JSON.stringify(todos, null, 2));
+            };
+
+            const deleteTag = (tagId) => {
+                setTags(prev => prev.filter(t => t.id !== tagId));
+            };
+
+            return (
+                <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+                    <div className="space-y-6">
+                        <div>
+                            <h4 className="font-medium mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <Icon name="Tag" size={16} /> Manage Tags
+                            </h4>
+                            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-2 max-h-40 overflow-y-auto space-y-2 border border-gray-100 dark:border-gray-700">
+                                {tags.map(tag => (
+                                    <div key={tag.id} className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-3 h-3 rounded-full ${tag.color.split(' ')[0]}`}></div>
+                                            <span className="text-sm font-medium">#{tag.name}</span>
+                                        </div>
+                                        <button onClick={() => deleteTag(tag.id)} className="text-gray-400 hover:text-red-500">
+                                            <Icon name="Trash2" size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <h4 className="font-medium mb-3 text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <Icon name="Database" size={16} /> Data Management
+                            </h4>
+                            <div className="flex gap-3 mb-3">
+                                <button onClick={handleExport} className="flex-1 px-3 py-2 border dark:border-gray-700 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Export to JSON</button>
+                                <button onClick={handleImport} className="flex-1 px-3 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 transition-colors">Import JSON</button>
+                            </div>
+                            <textarea 
+                                value={jsonInput} 
+                                onChange={(e) => setJsonInput(e.target.value)} 
+                                className="w-full h-32 text-xs font-mono bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-3 outline-none focus:border-primary-500" 
+                                placeholder="Paste JSON data here to import..."
+                            ></textarea>
+                        </div>
+                    </div>
+                </Modal>
+            );
+        };
+
+        const FocusMode = ({ todos, onClose, onComplete }) => {
+            const focusTodos = useMemo(() => {
+                const now = new Date();
+                return todos.filter(t => !t.completed && (
+                    !t.dueDate || new Date(t.dueDate).toDateString() === now.toDateString()
+                ));
+            }, [todos]);
+
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const currentTodo = focusTodos[currentIndex];
+
+            if (focusTodos.length === 0) {
+                 return (
+                    <div className="fixed inset-0 z-50 bg-white dark:bg-dark-bg flex flex-col items-center justify-center p-8">
+                        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center">
+                            <div className="w-24 h-24 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <Icon name="Check" size={48} className="text-green-600 dark:text-green-400" />
+                            </div>
+                            <h2 className="text-3xl font-bold mb-2">All Clear!</h2>
+                            <p className="text-gray-500 dark:text-gray-400 mb-8">You've crushed your day.</p>
+                            <button onClick={onClose} className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-full font-medium transition-colors">Return to Dashboard</button>
+                        </motion.div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="fixed inset-0 z-50 bg-white dark:bg-dark-bg flex flex-col">
+                    <div className="p-6 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
+                            <span className="font-semibold text-sm uppercase tracking-wider text-gray-500">Plan My Day</span>
+                        </div>
+                        <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"><Icon name="X" size={24} /></button>
+                    </div>
+
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 max-w-3xl mx-auto w-full">
+                        <AnimatePresence mode="wait">
+                            <motion.div 
+                                key={currentTodo.id}
+                                initial={{ y: 20, opacity: 0 }}
+                                animate={{ y: 0, opacity: 1 }}
+                                exit={{ y: -20, opacity: 0 }}
+                                className="w-full text-center"
+                            >
+                                <div className="mb-6 flex justify-center gap-2">
+                                    {currentTodo.priority === 'high' && <span className="px-3 py-1 rounded-full text-sm font-bold bg-red-100 text-red-600">HIGH PRIORITY</span>}
+                                    {currentTodo.tags.map(tag => <span key={tag} className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">#{tag}</span>)}
+                                </div>
+                                <h1 className="text-4xl md:text-5xl font-bold mb-8 leading-tight">{currentTodo.text}</h1>
+                                {currentTodo.stockMetadata && (
+                                    <div className="inline-block mt-4 px-4 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                                        <div className="text-sm font-mono">{currentTodo.stockMetadata.side.toUpperCase()} {currentTodo.stockMetadata.ticker} @ {currentTodo.stockMetadata.entryPrice}</div>
+                                    </div>
+                                )}
+                            </motion.div>
+                        </AnimatePresence>
+                    </div>
+
+                    <div className="p-8 flex justify-center items-center gap-6">
+                         <button onClick={() => setCurrentIndex((prev) => (prev + 1) % focusTodos.length)} className="p-4 rounded-full border-2 border-gray-200 dark:border-gray-700 text-gray-500 hover:border-gray-400 transition-colors"><Icon name="SkipForward" size={24} /></button>
+                        <button onClick={() => { onComplete(currentTodo.id); if (focusTodos.length <= 1) onClose(); }} className="w-20 h-20 rounded-full bg-primary-600 hover:bg-primary-700 text-white shadow-lg shadow-primary-500/30 flex items-center justify-center transform hover:scale-105 transition-all"><Icon name="Check" size={40} /></button>
+                    </div>
+                </div>
+            );
+        };
+
+        const InteractableChip = ({ label, icon, color, onClick }) => (
+            <button 
+                onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-transform hover:scale-105 active:scale-95 mx-1 ${color}`}
+            >
+                {icon && <Icon name={icon} size={10} />}
+                {label}
+            </button>
+        );
+
+        const PriorityBadge = ({ level }) => {
+            if (level === 'high') return <span className="text-xs font-bold text-red-500 bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 rounded uppercase">High</span>;
+            if (level === 'medium') return <span className="text-xs font-bold text-yellow-500 bg-yellow-50 dark:bg-yellow-900/20 px-1.5 py-0.5 rounded uppercase">Med</span>;
+            return null;
+        };
+
+        const StockCard = ({ todo }) => {
+            const { stockMetadata } = todo;
+            if (!stockMetadata) return null;
+            return (
+                <div className="mt-2 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 text-sm">
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-lg font-bold text-gray-900 dark:text-white">{stockMetadata.ticker}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase ${stockMetadata.side === 'sell' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{stockMetadata.side || 'BUY'}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 font-mono">{new Date(stockMetadata.entryTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="flex flex-col"><span className="text-[10px] uppercase text-gray-400">Entry</span><span className="font-mono font-medium">{stockMetadata.entryPrice || '-'}</span></div>
+                        <div className="flex flex-col"><span className="text-[10px] uppercase text-red-400">SL</span><span className="font-mono font-medium text-red-600 dark:text-red-400">{stockMetadata.sl || '-'}</span></div>
+                        <div className="flex flex-col"><span className="text-[10px] uppercase text-green-400">Target</span><span className="font-mono font-medium text-green-600 dark:text-green-400">{stockMetadata.tp || '-'}</span></div>
+                    </div>
+                    {stockMetadata.reason && <div className="text-xs text-gray-600 dark:text-gray-300 italic border-l-2 border-primary-300 pl-2">"{stockMetadata.reason}"</div>}
+                </div>
+            );
+        };
+
+        const TodoItem = ({ todo, onToggle, onDelete, onUpdate, tagsMap, viewMode, onDragStart, onDragOver, onDrop, enableReorder }) => {
+            const [isEditing, setIsEditing] = useState(false);
+            const [editText, setEditText] = useState(todo.text);
+
+            const handleSave = () => {
+                if (editText.trim() !== todo.text) {
+                    const parsed = parseTaskInput(editText, []); 
+                    const mergedTags = [...new Set([...todo.tags, ...parsed.tags])];
+                    
+                    onUpdate(todo.id, { 
+                        text: parsed.cleanText,
+                        tags: mergedTags,
+                        priority: parsed.priority !== 'low' ? parsed.priority : todo.priority,
+                        dueDate: parsed.dueDate || todo.dueDate,
+                        stockMetadata: parsed.stockMetadata || todo.stockMetadata
+                    });
+                }
+                setIsEditing(false);
+            };
+
+            const moveStatus = (direction) => {
+                const statuses = ['todo', 'doing', 'done'];
+                const currentIndex = statuses.indexOf(todo.status || 'todo');
+                const nextIndex = Math.min(Math.max(currentIndex + direction, 0), 2);
+                const nextStatus = statuses[nextIndex];
+                
+                let updates = { status: nextStatus };
+                if (nextStatus === 'done' && !todo.completed) updates.completed = true;
+                if (nextStatus !== 'done' && todo.completed) updates.completed = false;
+                
+                onUpdate(todo.id, updates);
+            };
+
+            const toggleComplete = () => {
+                onUpdate(todo.id, { 
+                    completed: !todo.completed,
+                    status: !todo.completed ? 'done' : 'todo'
+                });
+            };
+
+            // HTML5 DnD Handlers for Kanban mode
+            const handleDragStart = (e) => {
+                if (viewMode === 'kanban') {
+                    onDragStart(e, todo);
+                }
+            };
+            
+            const handleDragOver = (e) => {
+                if (viewMode === 'kanban') {
+                    e.preventDefault(); // Necessary to allow dropping
+                    onDragOver(e, todo);
+                }
+            };
+
+            const handleDrop = (e) => {
+                if (viewMode === 'kanban') {
+                    e.preventDefault();
+                    onDrop(e, todo);
+                }
+            };
+
+            const content = (
+                <div 
+                    draggable={viewMode === 'kanban'}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    className={`group relative rounded-xl border mb-3 transition-all duration-200 
+                    ${todo.completed ? 'bg-gray-50/50 dark:bg-dark-surface/30 border-gray-100 dark:border-gray-800' : 'bg-white dark:bg-dark-surface border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600'}
+                    ${viewMode === 'kanban' ? 'cursor-grab active:cursor-grabbing' : ''}
+                    `}
+                >
+                    <div className="flex items-start p-4 gap-3">
+                        {viewMode !== 'kanban' && (
+                            <button onClick={toggleComplete} className={`mt-1 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${todo.completed ? 'bg-primary-500 border-primary-500' : 'border-gray-300 dark:border-gray-600 hover:border-primary-500'}`}>
+                                {todo.completed && <Icon name="Check" size={12} className="text-white" />}
+                            </button>
+                        )}
+                        <div className="flex-1 min-w-0">
+                            {isEditing ? (
+                                <input 
+                                    autoFocus
+                                    className="w-full bg-transparent border-b border-primary-500 outline-none text-base text-gray-900 dark:text-gray-100 pb-1"
+                                    value={editText}
+                                    onChange={(e) => setEditText(e.target.value)}
+                                    onBlur={handleSave}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+                                    placeholder="Edit task... use #tags or @date"
+                                />
+                            ) : (
+                                <div onClick={() => { setEditText(todo.text); setIsEditing(true); }} className={`text-base leading-relaxed break-words cursor-text hover:text-primary-600 transition-colors ${todo.completed ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-gray-100'}`}>
+                                    {todo.text}
+                                </div>
+                            )}
+                            
+                            {todo.stockMetadata && <StockCard todo={todo} />}
+                            
+                            <div className="flex flex-wrap gap-2 mt-2 items-center relative">
+                                <PriorityBadge level={todo.priority} />
+                                {todo.dueDate && (
+                                    <div className="relative group/date">
+                                        <InteractableChip icon="Calendar" label={new Date(todo.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} color={todo.completed ? 'text-gray-400 bg-gray-100 dark:bg-gray-800' : 'text-orange-600 bg-orange-50 dark:text-orange-300 dark:bg-orange-900/20'} onClick={() => {}} />
+                                    </div>
+                                )}
+                                {todo.tags.map(tagName => {
+                                    const tagInfo = tagsMap.find(t => t.name === tagName);
+                                    const colorClass = tagInfo ? tagInfo.color : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+                                    return <InteractableChip key={tagName} label={`#${tagName}`} color={colorClass} onClick={() => {}} />;
+                                })}
+                            </div>
+                        </div>
+                        <div className="flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => onDelete(todo.id)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg"><Icon name="Trash2" size={16} /></button>
+                            {viewMode === 'list' && (
+                                <div className="cursor-grab active:cursor-grabbing p-1.5 text-gray-300 hover:text-gray-500 rounded-lg"><Icon name="GripVertical" size={16} /></div>
+                            )}
+                            {viewMode === 'kanban' && (
+                                <div className="flex gap-1">
+                                    <button disabled={todo.status === 'todo'} onClick={() => moveStatus(-1)} className="p-1 disabled:opacity-20 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"><Icon name="ArrowLeft" size={14} /></button>
+                                    <button disabled={todo.status === 'done'} onClick={() => moveStatus(1)} className="p-1 disabled:opacity-20 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"><Icon name="ArrowRight" size={14} /></button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            // Use Reorder.Item ONLY for list view AND when reorder is enabled
+            if (viewMode === 'list' && enableReorder) {
+                return (
+                    <Reorder.Item value={todo} id={todo.id} className="list-none">
+                        {content}
+                    </Reorder.Item>
+                );
+            }
+
+            return (
+                <div className="list-none">
+                     {content}
+                </div>
+            );
+        };
+
+        const KanbanColumn = ({ title, status, todos, onUpdate, onDelete, tagsMap, onColumnDrop, onDragStart, onDragOverItem, onItemDrop }) => {
+            const statusColor = { todo: 'bg-gray-100 dark:bg-gray-800/50', doing: 'bg-blue-50 dark:bg-blue-900/10', done: 'bg-green-50 dark:bg-green-900/10' }[status];
+            const icon = { todo: 'Circle', doing: 'Loader2', done: 'CheckCircle2' }[status];
+            
+            const handleColumnDragOver = (e) => {
+                e.preventDefault(); // allow drop
+            };
+
+            const handleColumnDrop = (e) => {
+                // Check if dropping on the empty space of column
+                // We rely on bubbling or specific target check?
+                // Actually, simple bubbling is fine. If `TodoItem` handled it, it stopped propagation.
+                // If it reached here, it means it wasn't dropped on an item.
+                onColumnDrop(e, status);
+            };
+
+            return (
+                <div 
+                    className="flex-1 min-w-[300px] flex flex-col h-full"
+                    onDragOver={handleColumnDragOver}
+                    onDrop={handleColumnDrop}
+                >
+                    <div className={`p-3 rounded-t-xl border-b border-gray-200 dark:border-gray-700 flex items-center justify-between ${statusColor}`}>
+                        <div className="flex items-center gap-2 font-semibold text-sm uppercase tracking-wider text-gray-600 dark:text-gray-300"><Icon name={icon} size={16} />{title}</div>
+                        <span className="bg-white dark:bg-gray-800 px-2 py-0.5 rounded-full text-xs font-bold shadow-sm">{todos.length}</span>
+                    </div>
+                    <div className="flex-1 bg-gray-50/50 dark:bg-dark-bg border-x border-b border-gray-100 dark:border-gray-800 rounded-b-xl p-3 overflow-y-auto space-y-3">
+                        {todos.map(todo => (
+                            <TodoItem 
+                                key={todo.id} 
+                                todo={todo} 
+                                onUpdate={onUpdate} 
+                                onDelete={onDelete} 
+                                tagsMap={tagsMap} 
+                                viewMode="kanban"
+                                onDragStart={onDragStart}
+                                onDragOver={onDragOverItem}
+                                onDrop={onItemDrop}
+                            />
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [todos, setTodos] = useState([]);
+            const [tags, setTags] = useState(DEFAULT_TAGS);
+            const [inputValue, setInputValue] = useState("");
+            const [viewMode, setViewMode] = useState('list');
+            const [filter, setFilter] = useState('all'); 
+            const [isDarkMode, setIsDarkMode] = useState(false);
+            const [suggestions, setSuggestions] = useState({ type: null, items: [] });
+            const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+            const [profile, setProfile] = useState('general');
+            const [showFocusMode, setShowFocusMode] = useState(false);
+            const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+            const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+            // DnD Refs
+            const dragItemRef = useRef(null); // The todo object being dragged
+            
+            useEffect(() => {
+                const saved = localStorage.getItem('pf_todos');
+                if (saved) setTodos(JSON.parse(saved));
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) setIsDarkMode(true);
+                
+                // Placeholder rotation
+                const interval = setInterval(() => {
+                    setPlaceholderIndex(prev => (prev + 1) % PLACEHOLDERS.length);
+                }, 4000);
+                return () => clearInterval(interval);
+            }, []);
+
+            useEffect(() => { localStorage.setItem('pf_todos', JSON.stringify(todos)); }, [todos]);
+            useEffect(() => { document.documentElement.classList.toggle('dark', isDarkMode); }, [isDarkMode]);
+
+            // --- HTML5 Drag & Drop Handlers for Kanban ---
+            
+            const handleKanbanDragStart = (e, todo) => {
+                dragItemRef.current = todo;
+                e.dataTransfer.effectAllowed = "move";
+                // Optionally set ghost image transparency
+                e.target.style.opacity = '0.5';
+            };
+
+            const handleKanbanDragOverItem = (e, targetTodo) => {
+                // Just prevent default to allow drop
+                // We could calculate insertion index visually here
+                e.preventDefault();
+            };
+
+            const handleKanbanDropOnItem = (e, targetTodo) => {
+                e.preventDefault();
+                e.stopPropagation(); // Stop bubbling to column container
+                
+                const dragged = dragItemRef.current;
+                e.target.style.opacity = '1'; // Reset opacity for safety (though component re-render handles it)
+                
+                if (!dragged || dragged.id === targetTodo.id) return;
+
+                // Create new list
+                const newTodos = [...todos];
+                const draggedIdx = newTodos.findIndex(t => t.id === dragged.id);
+                const targetIdx = newTodos.findIndex(t => t.id === targetTodo.id);
+
+                if (draggedIdx === -1 || targetIdx === -1) return;
+
+                // 1. Remove dragged item
+                const [removed] = newTodos.splice(draggedIdx, 1);
+                
+                // 2. Update status if dragging across columns
+                if (removed.status !== targetTodo.status) {
+                    removed.status = targetTodo.status;
+                    if (removed.status === 'done') removed.completed = true;
+                    else removed.completed = false;
+                }
+
+                // 3. Insert at new position
+                // Recalculate target index because removal might have shifted it
+                // Actually, if we use the original targetIdx, we need to adjust if draggedIdx < targetIdx.
+                // But a simpler way is to find target index again in the modified array?
+                // Standard splice insert:
+                // If we want to drop *on* item, usually means "place before" or "place after".
+                // Simple logic: Place at target index.
+                
+                // Let's find index of target in the *new* array (after removal)
+                let newTargetIdx = newTodos.findIndex(t => t.id === targetTodo.id);
+                if (newTargetIdx === -1) newTargetIdx = 0; // fallback
+
+                // Insert
+                newTodos.splice(newTargetIdx, 0, removed);
+                
+                setTodos(newTodos);
+                dragItemRef.current = null;
+                
+                // Reset opacity of all drag sources if generic
+                document.querySelectorAll('[draggable]').forEach(el => el.style.opacity = '1');
+            };
+
+            const handleKanbanDropOnColumn = (e, status) => {
+                e.preventDefault();
+                const dragged = dragItemRef.current;
+                if (!dragged) return;
+
+                if (dragged.status !== status) {
+                    const newTodos = todos.map(t => {
+                        if (t.id === dragged.id) {
+                            return { 
+                                ...t, 
+                                status: status,
+                                completed: status === 'done'
+                            };
+                        }
+                        return t;
+                    });
+                    setTodos(newTodos);
+                }
+                dragItemRef.current = null;
+                document.querySelectorAll('[draggable]').forEach(el => el.style.opacity = '1');
+            };
+
+            // --- Existing Handlers ---
+
+            const handleProfileChange = (newProfileId) => {
+                setProfile(newProfileId);
+                setIsProfileMenuOpen(false);
+                if (newProfileId === 'market') { setFilter('stock'); setViewMode('list'); } 
+                else if (newProfileId === 'work') { setFilter('all'); setViewMode('kanban'); } 
+                else { setFilter('all'); setViewMode('list'); }
+            };
+
+            const handleKeyDown = (e) => {
+                if (suggestions.items.length > 0) {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveSuggestionIndex(prev => (prev + 1) % suggestions.items.length); return; }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); setActiveSuggestionIndex(prev => (prev - 1 + suggestions.items.length) % suggestions.items.length); return; }
+                    if (e.key === 'Enter') { e.preventDefault(); insertSuggestion(suggestions.items[activeSuggestionIndex], suggestions.type); return; }
+                }
+            };
+
+            const handleAddTodo = (e) => {
+                e.preventDefault();
+                if (!inputValue.trim()) return;
+                
+                const parsed = parseTaskInput(inputValue);
+                const updatedTags = [...tags];
+                let tagsChanged = false;
+                parsed.tags.forEach(tagName => {
+                    if (!tags.find(t => t.name === tagName)) {
+                        updatedTags.push({ 
+                            id: generateId(), 
+                            name: tagName, 
+                            color: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' 
+                        });
+                        tagsChanged = true;
+                    }
+                });
+                if (tagsChanged) setTags(updatedTags);
+
+                const newTodo = { 
+                    id: generateId(), 
+                    text: parsed.cleanText, 
+                    completed: false, 
+                    status: 'todo', 
+                    tags: parsed.tags, 
+                    priority: parsed.priority, 
+                    dueDate: parsed.dueDate, 
+                    stockMetadata: parsed.stockMetadata, 
+                    createdAt: new Date().toISOString() 
+                };
+
+                setTodos(prev => [newTodo, ...prev]);
+                setInputValue("");
+                setSuggestions({ type: null, items: [] });
+            };
+
+            const insertSuggestion = (item, type) => {
+                const words = inputValue.split(' ');
+                words.pop();
+                let newText = words.join(' ') + (words.length > 0 ? ' ' : '');
+                if (type === 'tag') newText += `#${item.name} `; else if (type === 'date') newText += `@${item.value}`;
+                setInputValue(newText);
+                setSuggestions({ type: null, items: [] });
+                document.getElementById('main-input')?.focus();
+            };
+
+            useEffect(() => {
+                const words = inputValue.split(/\s+/);
+                const lastWord = words[words.length - 1] || "";
+                if (lastWord.startsWith('#')) {
+                    const term = lastWord.slice(1).toLowerCase();
+                    setSuggestions({ type: 'tag', items: tags.filter(t => t.name.startsWith(term)) });
+                    setActiveSuggestionIndex(0);
+                } else if (lastWord.startsWith('@')) {
+                    const term = lastWord.slice(1).toLowerCase();
+                    if (term === 'next' || term.startsWith('next')) { setSuggestions({ type: 'date', items: WEEKDAYS }); } else { setSuggestions({ type: 'date', items: DATE_PRESETS.filter(d => d.label.startsWith(term)) }); }
+                    setActiveSuggestionIndex(0);
+                } else {
+                    setSuggestions({ type: null, items: [] });
+                }
+            }, [inputValue, tags]);
+
+            const updateTodo = (id, updates) => setTodos(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+            const deleteTodo = (id) => setTodos(prev => prev.filter(t => t.id !== id));
+            
+            const handleReorder = (newOrder) => {
+                if (filter === 'all') setTodos(newOrder);
+            };
+
+            const filteredTodos = useMemo(() => {
+                let res = todos;
+                if (filter === 'today') {
+                    const now = new Date().toDateString();
+                    res = res.filter(t => t.dueDate && new Date(t.dueDate).toDateString() === now);
+                } else if (filter === 'stock') {
+                    res = res.filter(t => t.tags.includes('stock'));
+                } else if (filter !== 'all') {
+                    res = res.filter(t => t.tags.includes(filter));
+                }
+                return res;
+            }, [todos, filter]);
+
+            const visibleTags = useMemo(() => {
+                const profileFilters = PROFILES[profile].filters;
+                if (profileFilters.length === 0) return tags;
+                return tags.filter(t => profileFilters.some(f => t.name.includes(f)));
+            }, [tags, profile]);
+
+            return (
+                <div className="flex h-screen overflow-hidden text-sm md:text-base selection:bg-primary-200 dark:selection:bg-primary-900">
+                    {/* Mobile Overlay */}
+                    {isSidebarOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+
+                    {/* Sidebar */}
+                    <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-dark-surface border-r border-gray-100 dark:border-gray-800 transform transition-transform duration-300 md:relative md:translate-x-0 flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                        {/* Profile Switcher */}
+                        <div className="p-4 border-b border-gray-100 dark:border-gray-800 relative">
+                            <button 
+                                onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                                        <Icon name={PROFILES[profile].icon} size={16} />
+                                    </div>
+                                    <div className="text-left">
+                                        <div className="font-bold text-sm text-slate-800 dark:text-white leading-tight">{PROFILES[profile].label}</div>
+                                        <div className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">Profile</div>
+                                    </div>
+                                </div>
+                                <Icon name="ChevronDown" size={14} className="text-gray-400" />
+                            </button>
+                            
+                            {isProfileMenuOpen && (
+                                <div className="absolute top-full left-4 right-4 mt-2 bg-white dark:bg-dark-surface rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-50">
+                                    {Object.values(PROFILES).map(p => (
+                                        <button 
+                                            key={p.id}
+                                            onClick={() => handleProfileChange(p.id)}
+                                            className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors ${profile === p.id ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600' : 'text-gray-600 dark:text-gray-300'}`}
+                                        >
+                                            <Icon name={p.icon} size={16} />
+                                            <span className="font-medium">{p.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+                            <div className="space-y-1">
+                                <button onClick={() => setShowFocusMode(true)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-white bg-gradient-to-r from-primary-600 to-purple-600 shadow-lg shadow-primary-500/20 hover:shadow-primary-500/30 transition-all transform hover:-translate-y-0.5 mb-4">
+                                    <Icon name="Play" size={18} fill="currentColor" /> <span className="font-bold">Plan My Day</span>
+                                </button>
+                                <button onClick={() => { setFilter('today'); setViewMode('list'); }} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${filter === 'today' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                    <Icon name="Sun" size={18} /> Today
+                                </button>
+                                <button onClick={() => { setFilter('all'); setViewMode('list'); }} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${filter === 'all' && viewMode === 'list' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                    <Icon name="Inbox" size={18} /> Inbox / All
+                                </button>
+                                <button onClick={() => { setFilter('all'); setViewMode('kanban'); }} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${viewMode === 'kanban' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                    <Icon name="Kanban" size={18} /> Board
+                                </button>
+                                {(profile === 'general' || profile === 'market') && (
+                                    <button onClick={() => { setFilter('stock'); setViewMode('list'); }} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${filter === 'stock' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                        <Icon name="LineChart" size={18} /> Stock Journal
+                                    </button>
+                                )}
+                            </div>
+
+                            <div>
+                                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+                                    <span>Quick Filters</span>
+                                </h3>
+                                <div className="space-y-1">
+                                    {visibleTags.map(tag => (
+                                        <button 
+                                            key={tag.id}
+                                            onClick={() => { setFilter(tag.name); setViewMode('list'); }}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors ${filter === tag.name ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span className={`w-2 h-2 rounded-full ${tag.color.split(' ')[0]}`}></span>
+                                                <span>#{tag.name}</span>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+                             <button onClick={() => setShowSettings(true)} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors text-sm w-full px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">
+                                <Icon name="Settings" size={16} /> <span>Settings</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Main */}
+                    <div className="flex-1 flex flex-col bg-gray-50 dark:bg-dark-bg relative">
+                        {/* Header */}
+                        <div className="px-8 py-6 flex justify-between items-end">
+                            <div className="flex items-center gap-4">
+                                <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2 text-gray-500"><Icon name="Menu" size={24} /></button>
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white capitalize">
+                                        {filter === 'all' ? (viewMode === 'kanban' ? 'Board' : 'All Tasks') : filter}
+                                    </h1>
+                                    <p className="text-gray-500 dark:text-gray-400 text-xs mt-1 font-mono">
+                                        {new Date().toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'})}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 rounded-full bg-white dark:bg-dark-surface border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all">
+                                <Icon name={isDarkMode ? "Sun" : "Moon"} size={18} />
+                            </button>
+                        </div>
+
+                        {/* Input */}
+                        <div className="px-8 mb-6 relative z-20">
+                            <form onSubmit={handleAddTodo} className="relative group">
+                                <div className="bg-white dark:bg-dark-surface rounded-xl shadow-lg shadow-gray-200/50 dark:shadow-none border border-transparent focus-within:border-primary-500 transition-all flex items-center pr-3">
+                                    <input 
+                                        id="main-input"
+                                        type="text" 
+                                        value={inputValue}
+                                        onChange={(e) => setInputValue(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder={PLACEHOLDERS[placeholderIndex]}
+                                        className="flex-1 bg-transparent p-4 outline-none text-gray-800 dark:text-gray-100 placeholder-gray-400"
+                                        autoComplete="off"
+                                    />
+                                    <button type="submit" className="p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors shadow-lg shadow-primary-500/30">
+                                        <Icon name="Plus" size={20} />
+                                    </button>
+                                </div>
+                                {suggestions.items.length > 0 && (
+                                    <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-dark-surface rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+                                        <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700 flex justify-between">
+                                            <span>Select {suggestions.type}</span>
+                                            <span>&#8645; to nav, Enter to select</span>
+                                        </div>
+                                        {suggestions.items.map((item, idx) => (
+                                            <div key={idx} onClick={() => insertSuggestion(item, suggestions.type)} className={`px-4 py-2.5 flex items-center gap-3 cursor-pointer ${idx === activeSuggestionIndex ? 'bg-primary-50 dark:bg-primary-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+                                                {suggestions.type === 'tag' ? <div className={`w-3 h-3 rounded-full ${item.color.split(' ')[0]}`}></div> : <Icon name={item.icon} size={14} className="text-gray-400" />}
+                                                <span className="font-medium text-gray-700 dark:text-gray-200">{suggestions.type === 'tag' ? item.name : item.label}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </form>
+                        </div>
+
+                        {/* View Content */}
+                        <div className="flex-1 overflow-hidden px-8 pb-8">
+                            {viewMode === 'kanban' ? (
+                                <div className="h-full flex gap-6 overflow-x-auto pb-4">
+                                    <KanbanColumn 
+                                        title="To Do" 
+                                        status="todo" 
+                                        todos={filteredTodos.filter(t => (!t.status || t.status === 'todo') && !t.completed)} 
+                                        onUpdate={updateTodo} 
+                                        onDelete={deleteTodo} 
+                                        tagsMap={tags}
+                                        onDragStart={handleKanbanDragStart}
+                                        onDragOverItem={handleKanbanDragOverItem}
+                                        onItemDrop={handleKanbanDropOnItem}
+                                        onColumnDrop={handleKanbanDropOnColumn}
+                                    />
+                                    <KanbanColumn 
+                                        title="In Progress" 
+                                        status="doing" 
+                                        todos={filteredTodos.filter(t => t.status === 'doing' && !t.completed)} 
+                                        onUpdate={updateTodo} 
+                                        onDelete={deleteTodo} 
+                                        tagsMap={tags}
+                                        onDragStart={handleKanbanDragStart}
+                                        onDragOverItem={handleKanbanDragOverItem}
+                                        onItemDrop={handleKanbanDropOnItem}
+                                        onColumnDrop={handleKanbanDropOnColumn}
+                                    />
+                                    <KanbanColumn 
+                                        title="Done" 
+                                        status="done" 
+                                        todos={filteredTodos.filter(t => t.status === 'done' || t.completed)} 
+                                        onUpdate={updateTodo} 
+                                        onDelete={deleteTodo} 
+                                        tagsMap={tags}
+                                        onDragStart={handleKanbanDragStart}
+                                        onDragOverItem={handleKanbanDragOverItem}
+                                        onItemDrop={handleKanbanDropOnItem}
+                                        onColumnDrop={handleKanbanDropOnColumn}
+                                    />
+                                </div>
+                            ) : (
+                                <div className="h-full overflow-y-auto space-y-2 pb-20">
+                                    {filteredTodos.length === 0 ? <div className="text-center text-gray-400 mt-20">No tasks found</div> : (
+                                        filter === 'all' ? (
+                                            <Reorder.Group axis="y" values={todos} onReorder={handleReorder} className="space-y-2">
+                                                {filteredTodos.map(todo => <TodoItem key={todo.id} todo={todo} onUpdate={updateTodo} onDelete={deleteTodo} tagsMap={tags} viewMode="list" enableReorder={true} />)}
+                                            </Reorder.Group>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {filteredTodos.map(todo => <TodoItem key={todo.id} todo={todo} onUpdate={updateTodo} onDelete={deleteTodo} tagsMap={tags} viewMode="list" enableReorder={false} />)}
+                                            </div>
+                                        )
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Modals */}
+                    {showFocusMode && <FocusMode todos={todos} onClose={() => setShowFocusMode(false)} onComplete={(id) => updateTodo(id, { completed: true, status: 'done' })} />}
+                    <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} todos={todos} setTodos={setTodos} tags={tags} setTags={setTags} />
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
